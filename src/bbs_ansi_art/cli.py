@@ -1,15 +1,8 @@
-"""CLI entry point for bbs-ansi-art."""
+"""CLI entry point - redirects to cli/ package."""
 
+from bbs_ansi_art.cli.main import main
 
-def main() -> None:
-    """Main CLI entry point."""
-    # Placeholder - full CLI implementation coming soon
-    print("bbs-ansi-art CLI - coming soon!")
-    print("For now, use the library directly:")
-    print("  import bbs_ansi_art as ansi")
-    print("  doc = ansi.load('artwork.ans')")
-    print("  print(doc.render())")
-
+__all__ = ["main"]
 
 if __name__ == "__main__":
     main()

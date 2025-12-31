@@ -43,14 +43,16 @@ dependencies = []
 
 [project.optional-dependencies]
 image = ["Pillow>=9.0"]
-cli = ["typer>=0.9", "rich>=13.0"]
-all = ["bbs-ansi-art[image,cli]"]
+cli = ["typer>=0.12", "rich>=13.0"]
+llm = ["anthropic>=0.40", "openai>=1.0"]
 dev = [
-    "pytest>=7.0",
+    "pytest>=8.0",
     "pytest-cov>=4.0",
-    "ruff>=0.1.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8.0",
     "mypy>=1.0",
 ]
+all = ["bbs-ansi-art[image,cli,llm]"]
 
 [project.scripts]
 bbs-ansi-art = "bbs_ansi_art.cli:main"
@@ -77,3 +79,18 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "external: tests requiring external .ans files",
+    "slow: slow-running tests",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8.0",
+    "mypy>=1.0",
+]
