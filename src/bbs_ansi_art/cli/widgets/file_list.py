@@ -234,9 +234,8 @@ class FileListWidget(BaseWidget):
                 self.on_open(item)
             return True
         elif event.key == Key.BACKSPACE or event.key == Key.LEFT or event.char == 'h':
-            # Only go up if we're not in a file (h/left could be for other purposes)
-            if event.key == Key.BACKSPACE or self._items[self._selected].is_dir or event.char == 'h':
-                self.go_up()
+            # Always go up to parent directory
+            self.go_up()
             return True
         elif event.char == '~':
             self.go_home()

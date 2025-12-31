@@ -49,6 +49,7 @@ class ViewerApp:
         self._show_sauce = False
         self._current_file: Optional[Path] = None
         self._load_error: Optional[str] = None
+        self._clean_message: Optional[str] = None
         self._needs_redraw = True
         self._last_size: Optional[tuple[int, int]] = None
 
@@ -210,6 +211,11 @@ class ViewerApp:
             self._show_sauce = not self._show_sauce
             return
         
+        # Clean current file
+        if event.char == 'c':
+            self._clean_current_file()
+            return
+        
         # All other input goes to file browser
         self.file_list.handle_input(event)
 
@@ -238,6 +244,23 @@ class ViewerApp:
             self._current_file = path  # Keep filename for error display
             self._load_error = str(e) or type(e).__name__
 
+    def _clean_current_file(self) -> None:
+        """Clean the current file and save a cleaned copy."""
+        if not self._current_file:
+            return
+        
+        from bbs_ansi_art.repair import clean_file
+        
+        try:
+            output_path, result = clean_file(self._current_file)
+            
+            if result.was_modified:
+                self._clean_message = f"Cleaned! Removed {result.sequences_removed} sequences → {output_path.name}"
+            else:
+                self._clean_message = "File is already clean"
+        except Exception as e:
+            self._clean_message = f"Error: {e}"
+
     def _update_status_bar(self, layout) -> None:
         """Update status bar."""
         shortcuts: list[Shortcut] = []
@@ -255,12 +278,18 @@ class ViewerApp:
         else:
             shortcuts.append(Shortcut("s", "SAUCE info"))
         
+        if self._current_file:
+            shortcuts.append(Shortcut("c", "Clean"))
+        
         shortcuts.append(Shortcut("q", "Quit"))
         
         self.status_bar.set_shortcuts(shortcuts)
         
-        # Left: current file
-        if self._current_file:
+        # Left: current file or clean message
+        if self._clean_message:
+            self.status_bar.set_left(self._clean_message)
+            self._clean_message = None  # Clear after showing once
+        elif self._current_file:
             self.status_bar.set_left(self._current_file.name)
         else:
             self.status_bar.set_left("")

@@ -1,4 +1,10 @@
-"""Repair and fix common issues in ANSI art files."""
+"""
+Repair module - clean and fix problematic ANSI art files.
 
-# Placeholder - implementations coming soon
-__all__: list[str] = []
+Provides tools to remove escape sequences that cause display issues
+on modern terminals while preserving the visual content.
+"""
+
+from bbs_ansi_art.repair.cleaner import clean_bytes, clean_file, CleanResult
+
+__all__ = ["clean_bytes", "clean_file", "CleanResult"]

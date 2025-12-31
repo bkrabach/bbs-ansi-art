@@ -122,4 +122,54 @@ def create_app() -> "typer.Typer":
         from bbs_ansi_art.cli.studio.viewer import run_viewer
         run_viewer(path)
     
+    @app.command()
+    def clean(
+        path: Annotated[Path, typer.Argument(help="File or directory to clean")],
+        output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output path")] = None,
+        batch: Annotated[bool, typer.Option("--batch", "-b", help="Clean all .ans files in directory")] = False,
+        in_place: Annotated[bool, typer.Option("--in-place", "-i", help="Overwrite original files")] = False,
+    ) -> None:
+        """Clean problematic escape sequences from ANSI files.
+        
+        Removes sequences that cause display issues:
+        - Window manipulation (causes flicker/resize)
+        - Mode set/reset (not needed for display)
+        """
+        from bbs_ansi_art.repair import clean_file
+        
+        if path.is_dir() or batch:
+            # Batch mode
+            directory = path if path.is_dir() else path.parent
+            output_dir = output or directory / "cleaned"
+            
+            if not in_place:
+                output_dir.mkdir(exist_ok=True)
+            
+            files = list(directory.glob("*.ANS")) + list(directory.glob("*.ans"))
+            
+            cleaned_count = 0
+            for f in sorted(files):
+                out_path = f if in_place else output_dir / f.name
+                _, result = clean_file(f, out_path)
+                
+                if result.was_modified:
+                    console.print(f"[green]{f.name}[/]: removed {result.sequences_removed} sequences")
+                    cleaned_count += 1
+                else:
+                    console.print(f"[dim]{f.name}[/]: clean")
+            
+            console.print(f"\n[bold]Cleaned {cleaned_count}/{len(files)} files[/]")
+            if not in_place:
+                console.print(f"Output: {output_dir}")
+        else:
+            # Single file
+            out_path = output or (path if in_place else None)
+            result_path, result = clean_file(path, out_path)
+            
+            if result.was_modified:
+                console.print(f"[green]Cleaned {path.name}[/] → {result_path.name}")
+                console.print(f"Removed {result.sequences_removed} problematic sequences")
+            else:
+                console.print(f"[dim]{path.name} is already clean[/]")
+    
     return app
