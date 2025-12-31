@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Optional
 
 from bbs_ansi_art.cli.widgets.base import BaseWidget, Rect
 from bbs_ansi_art.cli.core.input import KeyEvent
+
+
+def _visible_len(s: str) -> int:
+    """Get visible length of string (excluding ANSI codes)."""
+    return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
 
 
 @dataclass
@@ -42,46 +47,47 @@ class StatusBarWidget(BaseWidget):
         self._shortcuts = shortcuts
 
     def render(self, bounds: Rect) -> list[str]:
-        """Render the status bar."""
-        # Build shortcuts string
-        shortcut_parts = []
-        for sc in self._shortcuts:
-            shortcut_parts.append(f"\x1b[7m {sc.key} \x1b[0;36m {sc.label} ")
+        """Render the status bar, fitting within bounds.width."""
+        width = bounds.width
+        
+        # Build shortcuts from right, only include what fits
+        shortcut_parts: list[str] = []
+        shortcuts_visible_len = 0
+        
+        for sc in reversed(self._shortcuts):
+            part = f"\x1b[7m {sc.key} \x1b[0;36m{sc.label} "
+            part_len = _visible_len(part)
+            
+            # Reserve space for left text + some padding
+            if shortcuts_visible_len + part_len + 20 < width:
+                shortcut_parts.insert(0, part)
+                shortcuts_visible_len += part_len
+            else:
+                break
+        
         shortcuts_str = "".join(shortcut_parts)
-
-        # Build the bar
-        # Left: info text
-        # Center: scroll position
-        # Right: shortcuts
-
-        left = self._left_text[:bounds.width // 3]
+        
+        # Build left side
+        left = self._left_text
         center = self._center_text
         
-        # Calculate available space for shortcuts
-        # For simplicity, we'll build a single line
+        # Calculate available space for left+center
+        available = width - shortcuts_visible_len - 2
         
-        # Strip ANSI for length calculation
-        import re
-        def visible_len(s: str) -> int:
-            return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
-
-        line = f"\x1b[100m\x1b[97m {left}"
-        
-        # Add center text if there's room
+        left_center = f" {left}"
         if center:
-            line += f"  {center}"
+            left_center += f"  {center}"
         
-        # Pad and add shortcuts
-        current_len = visible_len(line)
-        shortcuts_len = visible_len(shortcuts_str)
-        padding_needed = bounds.width - current_len - shortcuts_len - 1
+        # Truncate if needed
+        if len(left_center) > available:
+            left_center = left_center[:available - 1] + "…"
         
-        if padding_needed > 0:
-            line += " " * padding_needed
+        # Build final line
+        padding_needed = width - len(left_center) - shortcuts_visible_len
+        padding = " " * max(0, padding_needed)
         
-        line += shortcuts_str
-        line += "\x1b[0m"
-
+        line = f"\x1b[100m\x1b[97m{left_center}{padding}{shortcuts_str}\x1b[0m"
+        
         return [line]
 
     def handle_input(self, event: KeyEvent) -> bool:

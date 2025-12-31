@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from bbs_ansi_art.core.document import AnsiDocument
 from bbs_ansi_art.cli.core.input import Key, KeyEvent
 from bbs_ansi_art.cli.widgets.base import BaseWidget, Rect
+
+
+def _truncate_ansi(s: str, max_width: int) -> str:
+    """
+    Truncate an ANSI-escaped string to max visible width.
+    
+    Preserves ANSI codes but counts only visible characters.
+    """
+    if max_width <= 0:
+        return ""
+    
+    result = []
+    visible_len = 0
+    i = 0
+    
+    while i < len(s) and visible_len < max_width:
+        if s[i] == '\x1b' and i + 1 < len(s) and s[i + 1] == '[':
+            # Start of ANSI escape sequence - include the whole thing
+            j = i + 2
+            while j < len(s) and s[j] not in 'ABCDEFGHJKSTfmsu':
+                j += 1
+            if j < len(s):
+                j += 1  # Include the terminating character
+            result.append(s[i:j])
+            i = j
+        else:
+            result.append(s[i])
+            visible_len += 1
+            i += 1
+    
+    return ''.join(result)
 
 
 class ArtCanvasWidget(BaseWidget):
@@ -18,6 +50,7 @@ class ArtCanvasWidget(BaseWidget):
         self._rendered_lines: list[str] = []
         self._scroll_y: int = 0
         self._visible_height: int = 20
+        self._visible_width: int = 80
 
     def load(self, doc: AnsiDocument) -> None:
         """Load an ANSI document for display."""
@@ -59,8 +92,9 @@ class ArtCanvasWidget(BaseWidget):
         return False
 
     def render(self, bounds: Rect) -> list[str]:
-        """Render visible portion of the art."""
+        """Render visible portion of the art, clipped to bounds."""
         self._visible_height = bounds.height
+        self._visible_width = bounds.width
 
         if not self._rendered_lines:
             # Empty state
@@ -70,8 +104,11 @@ class ArtCanvasWidget(BaseWidget):
                 lines[bounds.height // 2] = f"\x1b[90m{msg:^{bounds.width}}\x1b[0m"
             return lines
 
-        # Get visible slice
-        visible = self._rendered_lines[self._scroll_y:self._scroll_y + bounds.height]
+        # Get visible slice and truncate each line to width
+        visible = []
+        for line in self._rendered_lines[self._scroll_y:self._scroll_y + bounds.height]:
+            truncated = _truncate_ansi(line, bounds.width)
+            visible.append(truncated)
 
         # Pad to fill height
         while len(visible) < bounds.height:
