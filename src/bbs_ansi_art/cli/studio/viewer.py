@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Optional
 
 import bbs_ansi_art as ansi
-from bbs_ansi_art.cli.core.terminal import Terminal, TerminalSize
+from bbs_ansi_art.cli.core.terminal import Terminal
 from bbs_ansi_art.cli.core.input import InputReader, Key, KeyEvent
 from bbs_ansi_art.cli.widgets.base import Rect
 from bbs_ansi_art.cli.widgets.file_list import FileListWidget, FileItem
@@ -15,15 +16,29 @@ from bbs_ansi_art.cli.widgets.art_canvas import ArtCanvasWidget
 from bbs_ansi_art.cli.widgets.status_bar import StatusBarWidget, Shortcut
 
 
+def _visible_len(s: str) -> int:
+    """Get visible length of string (excluding ANSI codes)."""
+    return len(re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', s))
+
+
 class ViewerApp:
     """
     Interactive ANSI art viewer with file browser.
     
     Features:
-    - File browser with directory navigation
+    - Full directory tree navigation
     - Scrollable art display
     - SAUCE metadata viewing
     - Keyboard navigation (vim-style and arrows)
+    
+    File Browser Shortcuts:
+        ↑/k, ↓/j     Navigate up/down
+        Enter/l/→    Enter directory / open file
+        Backspace/h/← Go to parent directory
+        ~            Go to home directory
+        /            Go to root directory
+        .            Toggle hidden files
+        -            Go back in history
     """
 
     def __init__(self, initial_path: Optional[Path] = None) -> None:
@@ -37,6 +52,7 @@ class ViewerApp:
         self.file_list = FileListWidget(
             on_select=self._on_file_select,
             on_open=self._on_file_open,
+            on_directory_change=self._on_directory_change,
         )
         self.art_canvas = ArtCanvasWidget()
         self.status_bar = StatusBarWidget()
@@ -101,11 +117,7 @@ class ViewerApp:
             art_line = art_lines[y] if y < len(art_lines) else ""
             
             # Pad file line to width
-            import re
-            def visible_len(s: str) -> int:
-                return len(re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', s))
-            
-            file_visible_len = visible_len(file_line)
+            file_visible_len = _visible_len(file_line)
             if file_visible_len < file_list_width:
                 file_line += " " * (file_list_width - file_visible_len)
             
@@ -206,8 +218,12 @@ class ViewerApp:
         """Called when file is opened (Enter pressed)."""
         if not item.is_dir:
             self._load_file(item.path)
-            # Optionally switch focus to canvas
-            # self._toggle_focus()
+
+    def _on_directory_change(self, path: Path) -> None:
+        """Called when directory changes."""
+        # Clear canvas when navigating to new directory
+        # (will be updated when a file is selected)
+        pass
 
     def _load_file(self, path: Path) -> None:
         """Load an ANSI file into the viewer."""
@@ -216,25 +232,32 @@ class ViewerApp:
             self.art_canvas.load(doc)
             self._current_file = path
             self._show_sauce = False
-        except Exception as e:
+        except Exception:
             # Could show error in status bar
             self.art_canvas.clear()
             self._current_file = None
 
     def _update_shortcuts(self) -> None:
         """Update status bar shortcuts based on current state."""
-        shortcuts = [
-            Shortcut("Tab", "Switch"),
-            Shortcut("↑↓", "Navigate"),
-        ]
+        if self._focus_file_list:
+            shortcuts = [
+                Shortcut("↑↓", "Navigate"),
+                Shortcut("Enter", "Open"),
+                Shortcut("←/h", "Up dir"),
+                Shortcut("~", "Home"),
+            ]
+        else:
+            shortcuts = [
+                Shortcut("↑↓", "Scroll"),
+                Shortcut("PgUp/Dn", "Page"),
+            ]
         
-        if not self._focus_file_list:
-            shortcuts.append(Shortcut("PgUp/Dn", "Scroll"))
+        shortcuts.append(Shortcut("Tab", "Switch"))
         
         if self._show_sauce:
-            shortcuts.append(Shortcut("s", "Hide SAUCE"))
+            shortcuts.append(Shortcut("s", "Hide info"))
         else:
-            shortcuts.append(Shortcut("s", "SAUCE"))
+            shortcuts.append(Shortcut("s", "Info"))
         
         shortcuts.append(Shortcut("q", "Quit"))
         
@@ -263,6 +286,5 @@ def run_viewer(path: Optional[Path] = None) -> None:
 
 if __name__ == "__main__":
     # Allow running directly: python -m bbs_ansi_art.cli.studio.viewer [path]
-    import sys
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
     run_viewer(path)
