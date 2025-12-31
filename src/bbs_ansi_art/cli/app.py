@@ -27,15 +27,15 @@ def create_app() -> "typer.Typer":
     @app.command()
     def view(
         path: Annotated[Path, typer.Argument(help="File or directory to view")],
-        tui: Annotated[bool, typer.Option("--tui", "-t", help="Launch interactive TUI")] = False,
+        interactive: Annotated[bool, typer.Option("--interactive", "-i", help="Launch interactive studio")] = False,
         sauce: Annotated[bool, typer.Option("--sauce", "-s", help="Show SAUCE metadata")] = False,
     ) -> None:
-        """View ANSI artwork in terminal or TUI."""
+        """View ANSI artwork in terminal or studio."""
         import bbs_ansi_art as ansi
         
-        if path.is_dir() or tui:
-            # Launch TUI viewer
-            from bbs_ansi_art.cli.tui.viewer import run_viewer
+        if path.is_dir() or interactive:
+            # Launch studio viewer
+            from bbs_ansi_art.cli.studio.viewer import run_viewer
             run_viewer(path if path.exists() else None)
         else:
             # Simple terminal output
@@ -115,11 +115,11 @@ def create_app() -> "typer.Typer":
         console.print(f"[green]Converted {source} → {dest}[/]")
     
     @app.command()
-    def tui(
+    def studio(
         path: Annotated[Optional[Path], typer.Argument(help="Optional file or directory")] = None,
     ) -> None:
-        """Launch the interactive TUI application."""
-        from bbs_ansi_art.cli.tui.viewer import run_viewer
+        """Launch the interactive ANSI art studio."""
+        from bbs_ansi_art.cli.studio.viewer import run_viewer
         run_viewer(path)
     
     return app

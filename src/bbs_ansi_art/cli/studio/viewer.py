@@ -1,4 +1,4 @@
-"""Interactive TUI viewer for ANSI art files."""
+"""Interactive studio viewer for ANSI art files."""
 
 from __future__ import annotations
 
@@ -262,7 +262,7 @@ def run_viewer(path: Optional[Path] = None) -> None:
 
 
 if __name__ == "__main__":
-    # Allow running directly: python -m bbs_ansi_art.cli.tui.viewer [path]
+    # Allow running directly: python -m bbs_ansi_art.cli.studio.viewer [path]
     import sys
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
     run_viewer(path)

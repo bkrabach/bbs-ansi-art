@@ -8,7 +8,7 @@ Python library for ANSI art — create, view, convert, and repair BBS-era artwor
 - **SAUCE Metadata**: Full support for reading and writing SAUCE records
 - **Render**: Output to terminal, HTML, plain text, or images (PNG)
 - **Create**: Programmatic ANSI art creation with fluent builder API
-- **TUI Viewer**: Interactive terminal viewer with file browser
+- **Studio**: Interactive terminal studio with file browser
 - **LLM Integration**: Style presets and ArtSpec for AI-generated art
 
 ## Installation
@@ -19,7 +19,7 @@ uv pip install bbs-ansi-art
 
 With optional dependencies:
 ```bash
-uv pip install bbs-ansi-art[cli]    # TUI viewer and CLI tools
+uv pip install bbs-ansi-art[cli]    # Studio and CLI tools
 uv pip install bbs-ansi-art[image]  # PNG rendering (requires Pillow)
 uv pip install bbs-ansi-art[llm]    # LLM generation support
 uv pip install bbs-ansi-art[all]    # Everything
@@ -47,12 +47,12 @@ art = (ansi.create(80)
     .build())
 ```
 
-## TUI Viewer
+## Studio
 
-Launch the interactive viewer:
+Launch the interactive ANSI art studio:
 ```bash
-bbs-ansi-art tui ~/Downloads/
-bbs-ansi-art view artwork.ans --tui
+bbs-ansi-art studio ~/Downloads/
+bbs-ansi-art view artwork.ans -i
 ```
 
 ## LLM Art Generation (Preview)
@@ -83,10 +83,10 @@ bbs_ansi_art/
 ├── create/         # Builder API, ArtSpec
 ├── io/             # File read/write
 ├── llm/            # Style presets for AI generation
-└── cli/            # TUI viewer and CLI tools
+└── cli/            # Studio and CLI tools
     ├── core/       # Terminal, input handling
-    ├── widgets/    # Reusable TUI components
-    └── tui/        # Interactive applications
+    ├── widgets/    # Reusable components
+    └── studio/     # Interactive applications
 ```
 
 ## License
