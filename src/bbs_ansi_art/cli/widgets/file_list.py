@@ -183,18 +183,36 @@ class FileListWidget(BaseWidget):
         if not self._items:
             return False
 
-        # Movement
+        # Movement (with wrap-around)
         if event.key == Key.UP or event.char == 'k':
-            self._move_selection(-1)
+            self._move_selection_wrap(-1)
             return True
         elif event.key == Key.DOWN or event.char == 'j':
-            self._move_selection(1)
+            self._move_selection_wrap(1)
             return True
         elif event.key == Key.PAGE_UP:
             self._move_selection(-self._default_visible_height)
             return True
         elif event.key == Key.PAGE_DOWN:
             self._move_selection(self._default_visible_height)
+            return True
+        # Ctrl+U / Ctrl+D for half-page scroll (vim style)
+        elif event.raw == '\x15':  # Ctrl+U
+            self._move_selection(-self._default_visible_height // 2)
+            return True
+        elif event.raw == '\x04':  # Ctrl+D
+            self._move_selection(self._default_visible_height // 2)
+            return True
+        # g/G for top/bottom (vim style)
+        elif event.char == 'g':
+            self._selected = 0
+            self._scroll_offset = 0
+            self._fire_select()
+            return True
+        elif event.char == 'G':
+            self._selected = len(self._items) - 1
+            self._adjust_scroll()
+            self._fire_select()
             return True
         elif event.key == Key.HOME:
             self._selected = 0
@@ -237,8 +255,15 @@ class FileListWidget(BaseWidget):
         return False
 
     def _move_selection(self, delta: int) -> None:
+        """Move selection by delta, clamping to bounds."""
         self._selected = max(0, min(len(self._items) - 1, self._selected + delta))
-        # Scroll adjustment happens in render() with actual height
+        self._fire_select()
+
+    def _move_selection_wrap(self, delta: int) -> None:
+        """Move selection by delta, wrapping around at ends."""
+        if not self._items:
+            return
+        self._selected = (self._selected + delta) % len(self._items)
         self._fire_select()
 
     def _adjust_scroll(self) -> None:

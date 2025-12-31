@@ -49,6 +49,8 @@ class ViewerApp:
         self._show_sauce = False
         self._current_file: Optional[Path] = None
         self._load_error: Optional[str] = None
+        self._needs_redraw = True
+        self._last_size: Optional[tuple[int, int]] = None
 
     def run(self) -> None:
         """Main application loop."""
@@ -67,7 +69,18 @@ class ViewerApp:
         
         with Terminal.managed_mode():
             while self.running:
-                self._render()
+                # Check for terminal resize
+                size = Terminal.size()
+                current_size = (size.cols, size.rows)
+                if current_size != self._last_size:
+                    self._last_size = current_size
+                    self._needs_redraw = True
+                
+                # Only redraw when needed (preserves mouse selection)
+                if self._needs_redraw:
+                    self._render()
+                    self._needs_redraw = False
+                
                 self._handle_input()
 
     def _render(self) -> None:
@@ -175,9 +188,12 @@ class ViewerApp:
 
     def _handle_input(self) -> None:
         """Handle keyboard input."""
-        event = self.input.read(timeout=0.05)
+        event = self.input.read(timeout=0.1)  # Longer timeout = less CPU, better for selection
         if event is None:
             return
+        
+        # Any input means we need to redraw
+        self._needs_redraw = True
         
         # Quit
         if event.char == 'q' or event.key == Key.ESCAPE:

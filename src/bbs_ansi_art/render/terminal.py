@@ -46,8 +46,8 @@ class TerminalRenderer:
                     last_fg = cell.fg
                 
                 if cell.bg != last_bg:
-                    # Use ESC[49m (default bg) instead of ESC[40m
-                    # to avoid palette black showing as gray
+                    # Use default bg (49) for black to match terminal background
+                    # True black (40) can appear as dark gray on modern terminals
                     sgr_parts.append('49' if cell.bg == 40 else str(cell.bg))
                     last_bg = cell.bg
                 
@@ -55,6 +55,13 @@ class TerminalRenderer:
                     line_parts.append(f"\x1b[{';'.join(sgr_parts)}m")
                 
                 line_parts.append(cell.char)
+            
+            # Reset at end of each line to prevent color bleeding into clear-to-EOL
+            if last_bg != 40 or last_bold:
+                line_parts.append('\x1b[0m')
+                last_fg = 37
+                last_bg = 40
+                last_bold = False
             
             lines.append(''.join(line_parts))
         
