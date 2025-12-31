@@ -24,10 +24,13 @@ class Canvas:
         if not self._buffer:
             self._ensure_row(0)
     
-    def _ensure_row(self, row: int) -> None:
-        """Ensure the buffer has at least this many rows."""
+    def ensure_row(self, row: int) -> None:
+        """Ensure the buffer has at least this many rows (0-indexed)."""
         while len(self._buffer) <= row:
             self._buffer.append([Cell() for _ in range(self.width)])
+    
+    # Alias for backwards compatibility
+    _ensure_row = ensure_row
     
     def get(self, x: int, y: int) -> Cell:
         """Get the cell at position (x, y)."""

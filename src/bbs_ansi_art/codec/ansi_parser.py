@@ -1,7 +1,8 @@
-"""ANSI escape sequence parser with virtual terminal emulation."""
+"""ANSI escape sequence parser with virtual terminal emulation.
 
-import re
-from typing import Callable
+Based on the proven byte-level parsing approach - handles escape sequences
+at the raw byte level BEFORE any CP437 conversion.
+"""
 
 from bbs_ansi_art.core.canvas import Canvas
 from bbs_ansi_art.core.cell import Cell
@@ -14,10 +15,11 @@ class AnsiParser:
     
     Simulates a virtual terminal to correctly interpret cursor movements,
     color codes, and other ANSI escape sequences.
-    """
     
-    # Regex for CSI sequences: ESC [ params command
-    CSI_PATTERN = re.compile(r'\x1b\[([0-9;]*)([A-Za-z])')
+    Key insight: Parse escape sequences at the BYTE level, before any
+    character encoding conversion. Only convert displayable characters
+    to Unicode via CP437.
+    """
     
     def __init__(self, width: int = 80):
         self.width = width
@@ -36,48 +38,57 @@ class AnsiParser:
         self.saved_y = 0
     
     def feed(self, data: bytes) -> None:
-        """Process raw bytes (CP437 encoded) into the canvas."""
-        # Convert to Unicode
-        text = ''.join(CP437_TO_UNICODE[b] for b in data)
-        self._process_text(text)
-    
-    def feed_unicode(self, text: str) -> None:
-        """Process Unicode text into the canvas."""
-        self._process_text(text)
-    
-    def _process_text(self, text: str) -> None:
-        """Process text with ANSI sequences."""
+        """
+        Process raw bytes (CP437 encoded) into the canvas.
+        
+        Handles escape sequences at byte level before CP437 conversion.
+        """
         i = 0
-        while i < len(text):
-            # Check for escape sequence
-            if text[i] == '\x1b' and i + 1 < len(text) and text[i + 1] == '[':
-                # Find end of CSI sequence
-                match = self.CSI_PATTERN.match(text, i)
-                if match:
-                    params_str = match.group(1)
-                    command = match.group(2)
-                    self._handle_csi(params_str, command)
-                    i = match.end()
-                    continue
+        while i < len(data):
+            byte = data[i]
             
-            # Handle special characters
-            char = text[i]
-            if char == '\r':
+            if byte == 0x1B:  # ESC
+                # Parse escape sequence from raw bytes
+                i += 1
+                if i < len(data) and data[i] == 0x5B:  # '['
+                    i += 1
+                    seq = '['
+                    while i < len(data):
+                        ch = data[i]
+                        seq += chr(ch)
+                        i += 1
+                        # CSI sequences end with a letter (0x40-0x7E)
+                        if 0x40 <= ch <= 0x7E:
+                            break
+                    self._process_escape(seq)
+                continue
+            elif byte == 0x0D:  # CR - Carriage Return
                 self.cursor_x = 0
-            elif char == '\n':
+            elif byte == 0x0A:  # LF - Line Feed
                 self.cursor_y += 1
-                self.canvas._ensure_row(self.cursor_y)
-            elif char == '\x1a':
-                # EOF marker - stop processing
+                self.canvas.ensure_row(self.cursor_y)
+            elif byte == 0x09:  # TAB
+                # Move to next tab stop (every 8 columns)
+                self.cursor_x = ((self.cursor_x // 8) + 1) * 8
+                if self.cursor_x >= self.width:
+                    self.cursor_x = 0
+                    self.cursor_y += 1
+                    self.canvas.ensure_row(self.cursor_y)
+            elif byte == 0x1A:  # EOF (SAUCE marker)
                 break
-            elif char == '\x1b':
-                # Unhandled escape - skip
-                pass
             else:
-                # Regular character
+                # Regular character - convert CP437 to Unicode
+                char = CP437_TO_UNICODE[byte]
                 self._put_char(char)
             
             i += 1
+    
+    def feed_unicode(self, text: str) -> None:
+        """Process Unicode text into the canvas (for pre-converted text)."""
+        # Convert back to bytes and use standard feed
+        # This is a fallback - prefer feed() with raw bytes
+        data = text.encode('cp437', errors='replace')
+        self.feed(data)
     
     def _put_char(self, char: str) -> None:
         """Put a character at current cursor position."""
@@ -86,7 +97,7 @@ class AnsiParser:
             self.cursor_x = 0
             self.cursor_y += 1
         
-        self.canvas._ensure_row(self.cursor_y)
+        self.canvas.ensure_row(self.cursor_y)
         cell = self.canvas._buffer[self.cursor_y][self.cursor_x]
         cell.char = char
         cell.fg = self.fg
@@ -96,57 +107,79 @@ class AnsiParser:
         
         self.cursor_x += 1
     
-    def _handle_csi(self, params_str: str, command: str) -> None:
-        """Handle a CSI escape sequence."""
+    def _process_escape(self, seq: str) -> None:
+        """Process an ANSI escape sequence."""
+        if not seq.startswith('['):
+            return
+        
+        seq = seq[1:]  # Remove '['
+        
+        if not seq:
+            return
+        
+        # Get the final character (command)
+        cmd = seq[-1]
+        params_str = seq[:-1]
+        
         # Parse parameters
         params: list[int] = []
         if params_str:
-            params = [int(p) if p else 0 for p in params_str.split(';')]
+            for p in params_str.split(';'):
+                try:
+                    params.append(int(p) if p else 0)
+                except ValueError:
+                    params.append(0)
         
-        if command == 'm':
+        if cmd == 'm':
             self._handle_sgr(params)
-        elif command == 'H' or command == 'f':
+        elif cmd == 't':
+            # Window manipulation - IGNORE (causes terminal flicker/resize)
+            pass
+        elif cmd == 'h' or cmd == 'l':
+            # Mode set/reset (like ?7h for line wrap) - IGNORE for display
+            pass
+        elif cmd == 'H' or cmd == 'f':
             # Cursor position
             row = params[0] if params else 1
             col = params[1] if len(params) > 1 else 1
             self.cursor_y = max(0, row - 1)
             self.cursor_x = max(0, min(col - 1, self.width - 1))
-            self.canvas._ensure_row(self.cursor_y)
-        elif command == 'A':
+            self.canvas.ensure_row(self.cursor_y)
+        elif cmd == 'A':
             # Cursor up
             n = params[0] if params else 1
             self.cursor_y = max(0, self.cursor_y - n)
-        elif command == 'B':
+        elif cmd == 'B':
             # Cursor down
             n = params[0] if params else 1
             self.cursor_y += n
-            self.canvas._ensure_row(self.cursor_y)
-        elif command == 'C':
-            # Cursor forward
+            self.canvas.ensure_row(self.cursor_y)
+        elif cmd == 'C':
+            # Cursor forward (right)
             n = params[0] if params else 1
             if self.cursor_x >= self.width:
                 # At right margin: wrap first, then position
                 self.cursor_x = 0
                 self.cursor_y += 1
-                self.canvas._ensure_row(self.cursor_y)
+                self.canvas.ensure_row(self.cursor_y)
             self.cursor_x = min(self.cursor_x + n, self.width)
-        elif command == 'D':
-            # Cursor back
+        elif cmd == 'D':
+            # Cursor back (left)
             n = params[0] if params else 1
             self.cursor_x = max(0, self.cursor_x - n)
-        elif command == 'J':
+        elif cmd == 'J':
             # Erase in display
             mode = params[0] if params else 0
             self._erase_display(mode)
-        elif command == 'K':
+        elif cmd == 'K':
             # Erase in line
             mode = params[0] if params else 0
             self._erase_line(mode)
-        elif command == 's':
+        elif cmd == 's':
             # Save cursor position
             self.saved_x = self.cursor_x
             self.saved_y = self.cursor_y
-        elif command == 'u':
+        elif cmd == 'u':
             # Restore cursor position
             self.cursor_x = self.saved_x
             self.cursor_y = self.saved_y
@@ -205,7 +238,30 @@ class AnsiParser:
     
     def _erase_display(self, mode: int) -> None:
         """Erase in display."""
-        if mode == 2:
+        if mode == 0:
+            # Erase from cursor to end of display
+            self.canvas.ensure_row(self.cursor_y)
+            # Clear rest of current line
+            row = self.canvas._buffer[self.cursor_y]
+            for x in range(self.cursor_x, self.width):
+                row[x] = Cell()
+            # Clear all lines below
+            for y in range(self.cursor_y + 1, len(self.canvas._buffer)):
+                for x in range(self.width):
+                    self.canvas._buffer[y][x] = Cell()
+        elif mode == 1:
+            # Erase from start of display to cursor
+            # Clear all lines above
+            for y in range(self.cursor_y):
+                if y < len(self.canvas._buffer):
+                    for x in range(self.width):
+                        self.canvas._buffer[y][x] = Cell()
+            # Clear current line up to cursor
+            self.canvas.ensure_row(self.cursor_y)
+            row = self.canvas._buffer[self.cursor_y]
+            for x in range(self.cursor_x + 1):
+                row[x] = Cell()
+        elif mode == 2:
             # Erase entire display
             self.canvas = Canvas(width=self.width)
             self.cursor_x = 0
@@ -213,7 +269,7 @@ class AnsiParser:
     
     def _erase_line(self, mode: int) -> None:
         """Erase in line."""
-        self.canvas._ensure_row(self.cursor_y)
+        self.canvas.ensure_row(self.cursor_y)
         row = self.canvas._buffer[self.cursor_y]
         
         if mode == 0:

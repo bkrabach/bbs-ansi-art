@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -11,31 +10,21 @@ import bbs_ansi_art as ansi
 from bbs_ansi_art.cli.core.terminal import Terminal
 from bbs_ansi_art.cli.core.input import InputReader, Key
 from bbs_ansi_art.cli.core.layout import LayoutManager, LayoutMode
+from bbs_ansi_art.cli.core.ansi_text import visible_len, truncate, pad_to_width
 from bbs_ansi_art.cli.widgets.base import Rect
 from bbs_ansi_art.cli.widgets.file_list import FileListWidget, FileItem
 from bbs_ansi_art.cli.widgets.art_canvas import ArtCanvasWidget
 from bbs_ansi_art.cli.widgets.status_bar import StatusBarWidget, Shortcut
 
 
-def _visible_len(s: str) -> int:
-    """Get visible length of string (excluding ANSI codes)."""
-    return len(re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', s))
-
-
 class ViewerApp:
     """
-    Interactive ANSI art viewer with responsive layout.
+    Interactive ANSI art viewer.
     
-    Layout modes:
-    - NARROW (<80): Art only, truncated
-    - COMPACT (80-99): Art only, full width
-    - SPLIT (100-139): Browser + Art side by side
-    - WIDE (140+): Comfortable spacing
-    
-    Keyboard:
-    - Tab: Switch focus between panels
-    - b: Toggle browser panel visibility
-    - q/Esc: Quit
+    Simple design:
+    - Arrow keys navigate file browser
+    - Preview updates automatically on selection
+    - Commands: s=SAUCE info, b=toggle browser, q=quit
     """
 
     def __init__(self, initial_path: Optional[Path] = None) -> None:
@@ -51,14 +40,15 @@ class ViewerApp:
         # Widgets
         self.file_list = FileListWidget(
             on_select=self._on_file_select,
-            on_open=self._on_file_open,
         )
+        self.file_list.focused = True  # Always focused
         self.art_canvas = ArtCanvasWidget()
         self.status_bar = StatusBarWidget()
         
         # State
         self._show_sauce = False
         self._current_file: Optional[Path] = None
+        self._load_error: Optional[str] = None
 
     def run(self) -> None:
         """Main application loop."""
@@ -81,15 +71,13 @@ class ViewerApp:
                 self._handle_input()
 
     def _render(self) -> None:
-        """Render the full screen with responsive layout."""
+        """Render the full screen without flicker."""
         size = Terminal.size()
         layout = self.layout_mgr.calculate(size.cols, size.rows)
         
-        # Update widget focus states
-        self.file_list.focused = self.layout_mgr.browser_focused
-        self.art_canvas.focused = self.layout_mgr.art_focused
-        
-        Terminal.clear()
+        # Move to home instead of clearing - prevents flicker
+        # Each line ends with \x1b[K to clear any leftover content
+        Terminal.move_to(1, 1)
         
         output_lines: list[str] = []
         
@@ -106,39 +94,52 @@ class ViewerApp:
                 file_line = file_lines[y] if y < len(file_lines) else ""
                 art_line = art_lines[y] if y < len(art_lines) else ""
                 
-                # Pad file line to exact width
-                file_vis_len = _visible_len(file_line)
-                if file_vis_len < layout.browser_width:
-                    file_line += " " * (layout.browser_width - file_vis_len)
+                # Ensure exact widths
+                file_line = pad_to_width(truncate(file_line, layout.browser_width), layout.browser_width)
+                art_line = truncate(art_line, layout.art_width)
                 
-                # Separator
                 sep = "\x1b[90m│\x1b[0m"
-                
-                # Truncate combined line to terminal width
-                combined = f"{file_line}{sep}{art_line}"
+                combined = f"{file_line}{sep}{art_line}\x1b[K"
                 output_lines.append(combined)
         else:
             # Art-only layout
             art_bounds = Rect(0, 0, layout.art_width, layout.art_height)
             art_lines = self._render_art_panel(art_bounds)
-            output_lines.extend(art_lines)
+            for line in art_lines:
+                output_lines.append(truncate(line, layout.art_width) + "\x1b[K")
         
         # Render status bar
         self._update_status_bar(layout)
         status_bounds = Rect(0, 0, layout.term_width, 1)
         status_lines = self.status_bar.render(status_bounds)
-        output_lines.extend(status_lines)
+        for line in status_lines:
+            output_lines.append(truncate(line, layout.term_width))
         
-        # Output everything
+        # Output
         Terminal.move_to(1, 1)
-        sys.stdout.write('\n'.join(output_lines))
+        sys.stdout.write('\r\n'.join(output_lines))
         sys.stdout.flush()
 
     def _render_art_panel(self, bounds: Rect) -> list[str]:
-        """Render art or SAUCE info panel."""
+        """Render art, SAUCE info, or error message."""
+        if self._load_error:
+            return self._render_error(bounds)
         if self._show_sauce and self.art_canvas.document:
             return self._render_sauce_info(bounds)
         return self.art_canvas.render(bounds)
+
+    def _render_error(self, bounds: Rect) -> list[str]:
+        """Render error message panel."""
+        lines: list[str] = []
+        lines.append("")
+        lines.append(f"\x1b[1;31m  Error loading file:\x1b[0m")
+        lines.append(f"\x1b[31m  {self._load_error}\x1b[0m")
+        lines.append("")
+        lines.append("\x1b[90m  The file may be corrupted or in an unsupported format.\x1b[0m")
+        
+        while len(lines) < bounds.height:
+            lines.append("")
+        return lines[:bounds.height]
 
     def _render_sauce_info(self, bounds: Rect) -> list[str]:
         """Render SAUCE metadata panel."""
@@ -149,9 +150,10 @@ class ViewerApp:
             lines.append("\x1b[33mNo SAUCE metadata\x1b[0m")
         else:
             s = doc.sauce
-            lines.append(f"\x1b[1;36m{'═' * min(40, bounds.width)}\x1b[0m")
+            bar_width = min(40, bounds.width)
+            lines.append(f"\x1b[1;36m{'═' * bar_width}\x1b[0m")
             lines.append(f"\x1b[1;36m  SAUCE Metadata\x1b[0m")
-            lines.append(f"\x1b[1;36m{'═' * min(40, bounds.width)}\x1b[0m")
+            lines.append(f"\x1b[1;36m{'═' * bar_width}\x1b[0m")
             lines.append("")
             lines.append(f"\x1b[1mTitle:\x1b[0m  {s.title or '(none)'}")
             lines.append(f"\x1b[1mAuthor:\x1b[0m {s.author or '(none)'}")
@@ -166,7 +168,6 @@ class ViewerApp:
                 for comment in s.comments:
                     lines.append(f"  {comment}")
         
-        # Pad to height
         while len(lines) < bounds.height:
             lines.append("")
         
@@ -178,19 +179,12 @@ class ViewerApp:
         if event is None:
             return
         
-        # Global shortcuts
-        if event.char == 'q':
+        # Quit
+        if event.char == 'q' or event.key == Key.ESCAPE:
             self.running = False
             return
         
-        if event.key == Key.ESCAPE:
-            if self._show_sauce:
-                self._show_sauce = False
-            else:
-                self.running = False
-            return
-        
-        # Toggle browser (b key)
+        # Toggle browser visibility
         if event.char == 'b':
             self.layout_mgr.toggle_browser()
             return
@@ -200,79 +194,64 @@ class ViewerApp:
             self._show_sauce = not self._show_sauce
             return
         
-        # Switch focus (Tab)
-        if event.key == Key.TAB:
-            self.layout_mgr.cycle_focus()
-            return
-        
-        # Route to focused widget
-        if self.layout_mgr.browser_focused and self.layout_mgr.layout and self.layout_mgr.layout.browser_visible:
-            self.file_list.handle_input(event)
-        else:
-            self.art_canvas.handle_input(event)
+        # All other input goes to file browser
+        self.file_list.handle_input(event)
 
     def _on_file_select(self, item: FileItem) -> None:
-        """Called when file selection changes."""
+        """Called when file selection changes - load preview."""
         if not item.is_dir:
             self._load_file(item.path)
-
-    def _on_file_open(self, item: FileItem) -> None:
-        """Called when file is opened (Enter pressed)."""
-        if not item.is_dir:
-            self._load_file(item.path)
+        else:
+            # Clear preview when on a directory
+            self.art_canvas.clear()
+            self._current_file = None
+            self._show_sauce = False
 
     def _load_file(self, path: Path) -> None:
-        """Load an ANSI file into the viewer."""
+        """Load an ANSI file for preview."""
         try:
             doc = ansi.load(path)
             self.art_canvas.load(doc)
             self._current_file = path
+            self._load_error = None
             self._show_sauce = False
-            # Update layout manager with art width
             if doc.canvas:
                 self.layout_mgr.set_art_width(doc.canvas.width)
-        except Exception:
+        except Exception as e:
             self.art_canvas.clear()
-            self._current_file = None
+            self._current_file = path  # Keep filename for error display
+            self._load_error = str(e) or type(e).__name__
 
     def _update_status_bar(self, layout) -> None:
-        """Update status bar based on current state and layout."""
+        """Update status bar."""
         shortcuts: list[Shortcut] = []
         
-        # Context-aware shortcuts based on layout mode
-        if layout.browser_visible:
-            if self.layout_mgr.browser_focused:
-                shortcuts.append(Shortcut("↑↓", "Nav"))
-                shortcuts.append(Shortcut("Enter", "Open"))
-                shortcuts.append(Shortcut("←", "Up"))
-            else:
-                shortcuts.append(Shortcut("↑↓", "Scroll"))
-            shortcuts.append(Shortcut("Tab", "Switch"))
-            shortcuts.append(Shortcut("b", "Hide"))
-        else:
-            shortcuts.append(Shortcut("↑↓", "Scroll"))
-            if layout.mode in (LayoutMode.SPLIT, LayoutMode.WIDE):
-                shortcuts.append(Shortcut("b", "Browser"))
+        shortcuts.append(Shortcut("↑↓", "Navigate"))
+        shortcuts.append(Shortcut("⏎", "Enter dir"))
         
-        shortcuts.append(Shortcut("s", "Info" if not self._show_sauce else "Art"))
+        if layout.browser_visible:
+            shortcuts.append(Shortcut("b", "Hide browser"))
+        else:
+            shortcuts.append(Shortcut("b", "Show browser"))
+        
+        if self._show_sauce:
+            shortcuts.append(Shortcut("s", "Show art"))
+        else:
+            shortcuts.append(Shortcut("s", "SAUCE info"))
+        
         shortcuts.append(Shortcut("q", "Quit"))
         
         self.status_bar.set_shortcuts(shortcuts)
         
-        # Left text: filename
+        # Left: current file
         if self._current_file:
             self.status_bar.set_left(self._current_file.name)
         else:
             self.status_bar.set_left("")
         
-        # Center text: art info
-        if self.art_canvas.document and not self._show_sauce:
-            total = self.art_canvas.total_lines
-            pct = self.art_canvas.scroll_percent
-            mode_indicator = f"[{layout.mode.value}]" if layout.mode != LayoutMode.WIDE else ""
-            self.status_bar.set_center(f"{total}L {pct:.0f}% {mode_indicator}")
-        else:
-            self.status_bar.set_center("")
+        # Center: directory info
+        dir_path = self.file_list.current_directory
+        self.status_bar.set_center(str(dir_path))
 
 
 def run_viewer(path: Optional[Path] = None) -> None:

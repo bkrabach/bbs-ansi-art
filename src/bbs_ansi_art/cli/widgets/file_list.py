@@ -75,7 +75,7 @@ class FileListWidget(BaseWidget):
         self._selected: int = 0
         self._scroll_offset: int = 0
         self._current_dir: Path = Path.cwd()
-        self._visible_height: int = 20
+        self._default_visible_height: int = 20  # Default, actual height comes from render bounds
         self._history: list[Path] = []  # For potential back/forward navigation
         self._dir_count: int = 0
         self._file_count: int = 0
@@ -191,10 +191,10 @@ class FileListWidget(BaseWidget):
             self._move_selection(1)
             return True
         elif event.key == Key.PAGE_UP:
-            self._move_selection(-self._visible_height)
+            self._move_selection(-self._default_visible_height)
             return True
         elif event.key == Key.PAGE_DOWN:
-            self._move_selection(self._visible_height)
+            self._move_selection(self._default_visible_height)
             return True
         elif event.key == Key.HOME:
             self._selected = 0
@@ -238,15 +238,21 @@ class FileListWidget(BaseWidget):
 
     def _move_selection(self, delta: int) -> None:
         self._selected = max(0, min(len(self._items) - 1, self._selected + delta))
-        self._adjust_scroll()
+        # Scroll adjustment happens in render() with actual height
         self._fire_select()
 
     def _adjust_scroll(self) -> None:
-        """Ensure selected item is visible."""
+        """Adjust scroll using default visible height (for input handling)."""
+        self._adjust_scroll_for_height(self._default_visible_height)
+
+    def _adjust_scroll_for_height(self, visible_height: int) -> None:
+        """Ensure selected item is visible for given viewport height."""
+        if visible_height <= 0:
+            return
         if self._selected < self._scroll_offset:
             self._scroll_offset = self._selected
-        elif self._selected >= self._scroll_offset + self._visible_height:
-            self._scroll_offset = self._selected - self._visible_height + 1
+        elif self._selected >= self._scroll_offset + visible_height:
+            self._scroll_offset = self._selected - visible_height + 1
 
     def _fire_select(self) -> None:
         if self.on_select and self._items:
@@ -254,11 +260,12 @@ class FileListWidget(BaseWidget):
 
     def render(self, bounds: Rect) -> list[str]:
         """Render the file list."""
-        self._visible_height = bounds.height - 2  # Reserve for header + counts
+        # Calculate visible height for this render (don't store as side effect)
+        visible_height = bounds.height - 2  # Reserve for header + counts
         lines: list[str] = []
 
-        # Adjust scroll
-        self._adjust_scroll()
+        # Adjust scroll based on current visible height
+        self._adjust_scroll_for_height(visible_height)
 
         # Header: breadcrumb path
         lines.append(self._render_breadcrumb(bounds.width))
@@ -271,7 +278,7 @@ class FileListWidget(BaseWidget):
 
         # File list
         visible_start = self._scroll_offset
-        visible_end = min(visible_start + self._visible_height, len(self._items))
+        visible_end = min(visible_start + visible_height, len(self._items))
 
         for i in range(visible_start, visible_end):
             item = self._items[i]
@@ -300,10 +307,15 @@ class FileListWidget(BaseWidget):
             else:
                 color = "0"   # Default
             
-            if is_selected and self.focused:
-                line = f"\x1b[7;{color}m {icon} {name:<{max_name_len}} \x1b[0m"
-            elif is_selected:
-                line = f"\x1b[100;{color}m {icon} {name:<{max_name_len}} \x1b[0m"
+            # Selection styling - always visible, brighter when focused
+            if is_selected:
+                # Bright cyan background when focused, dimmer when not
+                if self.focused:
+                    # Focused: bright inverse with cyan highlight
+                    line = f"\x1b[30;46m▶{icon} {name:<{max_name_len}} \x1b[0m"
+                else:
+                    # Unfocused: still visible but dimmer
+                    line = f"\x1b[30;106m {icon} {name:<{max_name_len}} \x1b[0m"
             else:
                 line = f"\x1b[{color}m {icon} {name}\x1b[0m"
 
