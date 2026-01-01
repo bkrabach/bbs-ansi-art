@@ -124,10 +124,11 @@ def create_app() -> "typer.Typer":
     
     @app.command()
     def clean(
-        path: Annotated[Path, typer.Argument(help="File or directory to clean")],
-        output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output path")] = None,
-        batch: Annotated[bool, typer.Option("--batch", "-b", help="Clean all .ans files in directory")] = False,
+        paths: Annotated[list[Path], typer.Argument(help="File(s) or directory to clean")],
+        output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output directory for cleaned files")] = None,
         in_place: Annotated[bool, typer.Option("--in-place", "-i", help="Overwrite original files")] = False,
+        strip_sauce: Annotated[bool, typer.Option("--strip-sauce", "-s", help="Remove SAUCE metadata")] = False,
+        strip_text: Annotated[bool, typer.Option("--strip-text", "-t", help="Replace text with spaces (keep only graphical chars)")] = False,
     ) -> None:
         """Clean problematic escape sequences from ANSI files.
         
@@ -137,39 +138,48 @@ def create_app() -> "typer.Typer":
         """
         from bbs_ansi_art.repair import clean_file
         
-        if path.is_dir() or batch:
-            # Batch mode
-            directory = path if path.is_dir() else path.parent
-            output_dir = output or directory / "cleaned"
+        # Collect all files to process
+        files: list[Path] = []
+        for p in paths:
+            if p.is_dir():
+                files.extend(p.glob("*.ANS"))
+                files.extend(p.glob("*.ans"))
+            else:
+                files.append(p)
+        
+        if not files:
+            console.print("[yellow]No .ans files found[/]")
+            return
+        
+        # Determine output directory
+        output_dir = output
+        if output_dir and not in_place:
+            output_dir.mkdir(exist_ok=True)
+        
+        cleaned_count = 0
+        for f in sorted(files):
+            if in_place:
+                out_path = f
+            elif output_dir:
+                out_path = output_dir / f.name
+            else:
+                out_path = f.with_stem(f.stem + "_clean")
             
-            if not in_place:
-                output_dir.mkdir(exist_ok=True)
-            
-            files = list(directory.glob("*.ANS")) + list(directory.glob("*.ans"))
-            
-            cleaned_count = 0
-            for f in sorted(files):
-                out_path = f if in_place else output_dir / f.name
-                _, result = clean_file(f, out_path)
-                
-                if result.was_modified:
-                    console.print(f"[green]{f.name}[/]: removed {result.sequences_removed} sequences")
-                    cleaned_count += 1
-                else:
-                    console.print(f"[dim]{f.name}[/]: clean")
-            
-            console.print(f"\n[bold]Cleaned {cleaned_count}/{len(files)} files[/]")
-            if not in_place:
-                console.print(f"Output: {output_dir}")
-        else:
-            # Single file
-            out_path = output or (path if in_place else None)
-            result_path, result = clean_file(path, out_path)
+            _, result = clean_file(f, out_path, strip_sauce_data=strip_sauce, strip_text_data=strip_text)
             
             if result.was_modified:
-                console.print(f"[green]Cleaned {path.name}[/] → {result_path.name}")
-                console.print(f"Removed {result.sequences_removed} problematic sequences")
+                msg = f"removed {result.sequences_removed} sequences"
+                if result.details.get('sauce_stripped'):
+                    msg += f", stripped SAUCE ({result.details['sauce_stripped']} bytes)"
+                if result.details.get('text_chars_stripped'):
+                    msg += f", stripped {result.details['text_chars_stripped']} text chars"
+                console.print(f"[green]{f.name}[/]: {msg}")
+                cleaned_count += 1
             else:
-                console.print(f"[dim]{path.name} is already clean[/]")
+                console.print(f"[dim]{f.name}[/]: clean")
+        
+        console.print(f"\n[bold]Cleaned {cleaned_count}/{len(files)} files[/]")
+        if output_dir and not in_place:
+            console.print(f"Output: {output_dir}")
     
     return app

@@ -54,29 +54,119 @@ class CleanResult:
         return ", ".join(parts)
 
 
-def clean_bytes(data: bytes, optimize: bool = True, add_safety: bool = True) -> tuple[bytes, CleanResult]:
+# CP437 graphical characters (block drawing, box drawing, etc.) - bytes that should be kept
+# These are the non-text visual characters used in ANSI art
+CP437_GRAPHICAL = set(range(0x01, 0x20)) | {  # Control chars that render as symbols in CP437
+    0xB0, 0xB1, 0xB2,  # ░▒▓ shading
+    0xDB, 0xDC, 0xDD, 0xDE, 0xDF,  # █▄▌▐▀ blocks
+    0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5,  # └┴┬├─┼ box drawing
+    0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF,
+    0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA,
+    0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
+    0xFE,  # ■ small block
+}
+
+# Text characters to strip (ASCII alphanumerics and common punctuation)
+TEXT_CHARS = set(range(0x30, 0x3A)) | set(range(0x41, 0x5B)) | set(range(0x61, 0x7B))  # 0-9, A-Z, a-z
+TEXT_CHARS |= {ord(c) for c in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"}  # punctuation
+
+
+def strip_text(data: bytes) -> tuple[bytes, dict]:
+    """
+    Strip text characters from ANSI art, replacing with spaces.
+    
+    Preserves:
+    - Escape sequences (colors, cursor movement)
+    - Block drawing and graphical characters
+    - Spaces and structure
+    
+    Replaces with space:
+    - Letters (A-Z, a-z)
+    - Numbers (0-9)  
+    - Punctuation
+    
+    Args:
+        data: Raw bytes of ANSI art
+        
+    Returns:
+        Tuple of (stripped_bytes, details_dict)
+    """
+    result = bytearray()
+    details = {'text_chars_stripped': 0}
+    i = 0
+    
+    while i < len(data):
+        b = data[i]
+        
+        # Escape sequence - copy entirely (ESC [ ... <letter>)
+        if b == 0x1B and i + 1 < len(data) and data[i + 1] == ord('['):
+            result.append(b)  # ESC
+            result.append(data[i + 1])  # [
+            i += 2
+            # Copy params and command - sequence ends at letter (A-Z, a-z) or ~
+            while i < len(data):
+                b = data[i]
+                result.append(b)
+                i += 1
+                # Command letters end the sequence (but NOT '[' which is 0x5B)
+                if (b >= 0x41 and b <= 0x5A) or (b >= 0x61 and b <= 0x7A) or b == ord('~'):
+                    break
+            continue
+        
+        # Text character - replace with space
+        if b in TEXT_CHARS:
+            result.append(0x20)  # space
+            details['text_chars_stripped'] += 1
+            i += 1
+            continue
+        
+        # Everything else (graphical chars, spaces, newlines) - keep
+        result.append(b)
+        i += 1
+    
+    return bytes(result), details
+
+
+def strip_sauce(data: bytes) -> tuple[bytes, bytes]:
+    """
+    Strip SAUCE metadata from ANSI art data.
+    
+    Args:
+        data: Raw bytes of ANSI art file
+        
+    Returns:
+        Tuple of (art_data, sauce_data) - sauce_data is empty if none found
+    """
+    sauce_idx = data.find(b'\x1aSAUCE')
+    if sauce_idx >= 0:
+        return data[:sauce_idx], data[sauce_idx:]
+    return data, b''
+
+
+def clean_bytes(
+    data: bytes,
+    optimize: bool = True,
+    add_safety: bool = True,
+    strip_sauce_data: bool = False,
+    strip_text_data: bool = False,
+) -> tuple[bytes, CleanResult]:
     """
     Clean problematic escape sequences from ANSI art data.
     
     Works at byte level to preserve CP437 encoding.
-    Preserves SAUCE metadata.
     
     Args:
         data: Raw bytes of ANSI art file
         optimize: If True, also apply size optimizations
         add_safety: If True, add safety sequences (reset at end)
+        strip_sauce_data: If True, remove SAUCE metadata from output
+        strip_text_data: If True, replace text characters with spaces
         
     Returns:
         Tuple of (cleaned_bytes, CleanResult)
     """
-    # Separate SAUCE metadata (preserve it exactly)
-    sauce_idx = data.find(b'\x1aSAUCE')
-    if sauce_idx >= 0:
-        art_data = data[:sauce_idx]
-        sauce_data = data[sauce_idx:]
-    else:
-        art_data = data
-        sauce_data = b''
+    # Separate SAUCE metadata
+    art_data, sauce_data = strip_sauce(data)
     
     # First pass: remove problematic sequences
     cleaned, removed_count, details = _remove_problematic_sequences(art_data)
@@ -86,13 +176,22 @@ def clean_bytes(data: bytes, optimize: bool = True, add_safety: bool = True) -> 
         cleaned, opt_details = _optimize(cleaned)
         details.update(opt_details)
     
+    # Strip text if requested
+    if strip_text_data:
+        cleaned, text_details = strip_text(cleaned)
+        details.update(text_details)
+    
     # Third pass: add safety sequences
     if add_safety:
         cleaned, safety_details = _add_safety(cleaned)
         details.update(safety_details)
     
-    # Recombine with SAUCE
-    final = cleaned + sauce_data
+    # Track SAUCE stripping
+    if strip_sauce_data and sauce_data:
+        details['sauce_stripped'] = len(sauce_data)
+    
+    # Recombine with SAUCE (unless stripping)
+    final = cleaned if strip_sauce_data else cleaned + sauce_data
     
     return final, CleanResult(
         original_size=len(data),
@@ -373,6 +472,8 @@ def clean_file(
     input_path: Union[str, Path],
     output_path: Union[str, Path, None] = None,
     optimize: bool = True,
+    strip_sauce_data: bool = False,
+    strip_text_data: bool = False,
 ) -> tuple[Path, CleanResult]:
     """
     Clean a single ANSI file.
@@ -381,6 +482,8 @@ def clean_file(
         input_path: Path to input file
         output_path: Path to output file (default: input_clean.ans)
         optimize: If True, also apply size optimizations
+        strip_sauce_data: If True, remove SAUCE metadata from output
+        strip_text_data: If True, replace text characters with spaces
         
     Returns:
         Tuple of (output_path, CleanResult)
@@ -393,7 +496,12 @@ def clean_file(
         output_path = Path(output_path)
     
     data = input_path.read_bytes()
-    cleaned, result = clean_bytes(data, optimize=optimize)
+    cleaned, result = clean_bytes(
+        data,
+        optimize=optimize,
+        strip_sauce_data=strip_sauce_data,
+        strip_text_data=strip_text_data,
+    )
     
     output_path.write_bytes(cleaned)
     
