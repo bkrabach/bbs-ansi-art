@@ -17,11 +17,16 @@ class AnsiDocument:
     
     Combines Canvas + SAUCE metadata + source info into a single
     high-level object for working with ANSI art files.
+    
+    Supports two formats:
+    - Classic .ANS (CP437 encoding, 16-color)
+    - Modern .art (UTF-8 encoding, true-color)
     """
     canvas: Canvas = field(default_factory=Canvas)
     sauce: "SauceRecord | None" = None
     source_path: Path | None = None
     encoding: str = "cp437"
+    raw_text: str | None = None  # Original text for .art files (preserves true color)
     
     @classmethod
     def load(cls, path: str | Path) -> "AnsiDocument":
@@ -35,7 +40,17 @@ class AnsiDocument:
         save(self, path, include_sauce=include_sauce)
     
     def render(self) -> str:
-        """Render to terminal-compatible ANSI string."""
+        """Render to terminal-compatible ANSI string.
+        
+        For .art files (UTF-8/true-color), returns the original text
+        to preserve full color fidelity. For .ANS files, renders the
+        canvas with 16-color ANSI codes.
+        """
+        # For .art files, use the original true-color text
+        if self.raw_text is not None:
+            return self.raw_text.rstrip('\n')
+        
+        # For .ANS files, render from canvas
         from bbs_ansi_art.render.terminal import TerminalRenderer
         return TerminalRenderer().render(self.canvas)
     

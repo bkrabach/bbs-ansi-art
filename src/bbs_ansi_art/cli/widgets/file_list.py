@@ -54,7 +54,7 @@ class FileListWidget(BaseWidget):
             Space       Select/deselect for batch operations
     """
 
-    EXTENSIONS = {'.ans', '.asc', '.diz', '.nfo', '.txt'}
+    EXTENSIONS = {'.ans', '.asc', '.diz', '.nfo', '.txt', '.art'}
 
     def __init__(
         self,

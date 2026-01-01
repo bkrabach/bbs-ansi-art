@@ -122,6 +122,106 @@ def create_app() -> "typer.Typer":
         from bbs_ansi_art.cli.studio.viewer import run_viewer
         run_viewer(path)
     
+    @app.command("import-image")
+    def import_image(
+        sources: Annotated[list[str], typer.Argument(help="Source image(s) or glob pattern (e.g., 'logo-*.png')")],
+        output: Annotated[Optional[Path], typer.Option("--output", "-o", help="Output file or directory")] = None,
+        width: Annotated[int, typer.Option("--width", "-w", help="Target width in characters")] = 78,
+        no_sharpen: Annotated[bool, typer.Option("--no-sharpen", help="Disable sharpening")] = False,
+        color_boost: Annotated[float, typer.Option("--color-boost", help="Color saturation multiplier")] = 1.5,
+        contrast_boost: Annotated[float, typer.Option("--contrast-boost", help="Contrast multiplier")] = 1.2,
+        black_threshold: Annotated[int, typer.Option("--black-threshold", help="RGB values below this become pure black")] = 30,
+        transparent: Annotated[bool, typer.Option("--transparent", "-t", help="Preserve PNG alpha as transparent background")] = False,
+        alpha_threshold: Annotated[int, typer.Option("--alpha-threshold", help="Alpha values below this are transparent")] = 128,
+        transparent_color: Annotated[Optional[str], typer.Option("--transparent-color", "-k", help="Chroma key: treat this color as transparent (e.g., black, #FF00FF)")] = None,
+        color_tolerance: Annotated[int, typer.Option("--color-tolerance", help="How close to transparent-color to be transparent")] = 30,
+    ) -> None:
+        """Convert image(s) to terminal art (.art format).
+        
+        Creates .art files using true color (24-bit RGB) and half-block
+        characters for high-fidelity display in modern terminals.
+        
+        Supports glob patterns for batch conversion.
+        
+        Examples:
+            bbs-ansi-art import-image logo.png
+            bbs-ansi-art import-image logo.png -o logo.art -w 60
+            bbs-ansi-art import-image 'amplifier-art-*.png' -o art/
+            bbs-ansi-art import-image logo.png -k black  # black becomes transparent
+            cat logo.art  # display it
+        """
+        import glob
+        
+        try:
+            from bbs_ansi_art.import_image import from_png
+        except ImportError:
+            console.print("[red]Pillow is required for image import.[/]")
+            console.print("Install with: [cyan]uv pip install bbs-ansi-art[image][/]")
+            raise typer.Exit(1)
+        
+        # Expand glob patterns
+        files: list[Path] = []
+        for pattern in sources:
+            matches = glob.glob(pattern)
+            if matches:
+                files.extend(Path(m) for m in matches)
+            else:
+                # Treat as literal path
+                files.append(Path(pattern))
+        
+        if not files:
+            console.print("[red]No files matched[/]")
+            raise typer.Exit(1)
+        
+        # Determine output mode
+        is_batch = len(files) > 1
+        out_dir: Optional[Path] = None
+        
+        if is_batch:
+            if output:
+                out_dir = output
+                out_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                console.print("[red]Multiple files require --output directory[/]")
+                raise typer.Exit(1)
+        
+        # Process files
+        success = 0
+        for source in sorted(files):
+            if not source.exists():
+                console.print(f"[yellow]Skipping (not found): {source}[/]")
+                continue
+            
+            if is_batch:
+                out_path = out_dir / source.with_suffix(".art").name
+            else:
+                out_path = output or source.with_suffix(".art")
+            
+            try:
+                from_png(
+                    source,
+                    out_path,
+                    width=width,
+                    sharpen=not no_sharpen,
+                    color_boost=color_boost,
+                    contrast_boost=contrast_boost,
+                    transparent=transparent,
+                    alpha_threshold=alpha_threshold,
+                    black_threshold=black_threshold,
+                    transparent_color=transparent_color,
+                    color_tolerance=color_tolerance,
+                )
+                console.print(f"[green]{source.name}[/] → {out_path.name}")
+                success += 1
+            except Exception as e:
+                console.print(f"[red]{source.name}: {e}[/]")
+        
+        if is_batch:
+            console.print(f"\n[bold]Converted {success}/{len(files)} files[/] ({width} cols)")
+            console.print(f"[dim]View with: cat {out_dir}/*.art[/]")
+        elif success:
+            console.print(f"[dim]View with: cat {out_path}[/]")
+    
     @app.command()
     def clean(
         paths: Annotated[list[Path], typer.Argument(help="File(s) or directory to clean")],
