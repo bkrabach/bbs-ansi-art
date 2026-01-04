@@ -61,18 +61,26 @@ def truncate(s: str, max_width: int, reset: bool = True) -> str:
 
 
 def pad_to_width(s: str, width: int, char: str = ' ') -> str:
-    """Pad string with char to reach exactly width visible characters."""
+    """Pad string with char to reach exactly width visible characters.
+    
+    Adds a reset before padding to prevent color bleed from ANSI codes.
+    """
     current = visible_len(s)
     if current >= width:
         return s
-    return s + char * (width - current)
+    # Reset colors before padding to prevent color bleed
+    return s + '\x1b[0m' + char * (width - current)
 
 
 def truncate_and_pad(s: str, width: int) -> str:
-    """Truncate if too long, pad if too short. Always returns exactly width visible chars."""
+    """Truncate if too long, pad if too short. Always returns exactly width visible chars.
+    
+    Adds a reset before padding to prevent color bleed.
+    """
     vlen = visible_len(s)
     if vlen > width:
         return truncate(s, width)
     elif vlen < width:
-        return s + ' ' * (width - vlen)
+        # Reset colors before padding to prevent color bleed
+        return s + '\x1b[0m' + ' ' * (width - vlen)
     return s
