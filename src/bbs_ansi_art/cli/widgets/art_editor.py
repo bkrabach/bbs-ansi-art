@@ -929,8 +929,6 @@ class ArtEditorWidget(BaseWidget):
                     if not other_pixel.transparent:
                         other_color = other_pixel.rgb
             
-            col = cursor_view_x + 1  # 1-indexed for ANSI
-            
             if cursor_view_x < visible_len:
                 # Build cursor character with both halves
                 # Upper half block (▀): FG = top color, BG = bottom color
@@ -952,8 +950,11 @@ class ArtEditorWidget(BaseWidget):
                         bg_part = "\x1b[49m"
                     cursor_char = f"{fg_part}{bg_part}\u2584\x1b[0m"
                 
-                cursor_overlay = f"\x1b[s\x1b[{col}G{cursor_char}\x1b[u"
-                lines[cursor_view_y] = f"{line}{cursor_overlay}"
+                # Use ANSI-aware slicing to replace the character at cursor position
+                # This keeps the line length consistent (no extra characters)
+                before = _slice_ansi(line, 0, cursor_view_x)
+                after = _slice_ansi(line, cursor_view_x + 1, visible_len)
+                lines[cursor_view_y] = f"{before}{cursor_char}{after}"
             else:
                 # Cursor past content - show half-block on empty space
                 padding = " " * (cursor_view_x - visible_len)
