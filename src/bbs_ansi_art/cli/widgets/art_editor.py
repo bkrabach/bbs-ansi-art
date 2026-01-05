@@ -177,9 +177,10 @@ class ArtEditorWidget(BaseWidget):
             G: Go to bottom
             
         Drawing:
-            Space / Enter: Draw at cursor with current color
-            d: Draw and move right
-            x: Erase (draw with background color)
+            d: Draw at cursor with current color
+            D: Enter draw mode (draws while moving, Esc to exit)
+            x: Erase at cursor (draw transparent)
+            X: Enter erase mode (erases while moving, Esc to exit)
             
         Colors:
             0-9: Quick select color (0-9 from palette)
@@ -392,6 +393,18 @@ class ArtEditorWidget(BaseWidget):
             self._fg_color = ANSI_16_RGB[index]
             if self._on_color_change:
                 self._on_color_change(self._fg_index, self._bg_index)
+
+    def set_fg_color_rgb(self, color: tuple[int, int, int]) -> None:
+        """Set foreground color by RGB value directly.
+
+        This allows setting arbitrary colors not in the ANSI-16 palette.
+
+        Args:
+            color: RGB tuple (r, g, b)
+        """
+        self._fg_color = color
+        # Set index to -1 to indicate custom color (not in palette)
+        self._fg_index = -1
     
     def set_bg_color(self, index: int) -> None:
         """Set background color by palette index.
@@ -725,29 +738,30 @@ class ArtEditorWidget(BaseWidget):
             self._page_down()
             return True
         
-        # Drawing - space draws, x erases
-        # Single press: draw/erase once
-        # For continuous: use D to toggle draw mode, X to toggle erase mode
-        if event.char == ' ' or event.key == Key.ENTER:
+        # Drawing: d = single draw, D = draw mode, x = single erase, X = erase mode
+        if event.char == 'd':
             self._draw_at_cursor()
-            return True
-        elif event.char == 'd':
-            self._draw_and_advance()
             return True
         elif event.char == 'x':
             self._erase_at_cursor()
             return True
         
-        # Toggle continuous draw mode (capital D)
+        # Toggle continuous draw mode (capital D) - draws on entry + while moving
         elif event.char == 'D':
             self._draw_mode = not self._draw_mode
             self._erase_mode = False  # Can't have both
+            if self._draw_mode:
+                # Draw at current position when entering draw mode
+                self._draw_at_cursor()
             return True
         
-        # Toggle continuous erase mode (capital X)
+        # Toggle continuous erase mode (capital X) - erases on entry + while moving
         elif event.char == 'X':
             self._erase_mode = not self._erase_mode
             self._draw_mode = False  # Can't have both
+            if self._erase_mode:
+                # Erase at current position when entering erase mode
+                self._erase_at_cursor()
             return True
         
         # Escape exits any active mode first, then propagates
@@ -999,18 +1013,20 @@ class ArtEditorWidget(BaseWidget):
             "│    PgUp / PgDn         Scroll page │",
             "│                                    │",
             "│  DRAWING                           │",
-            "│    Space / Enter       Paint pixel │",
-            "│    d                   Paint+move  │",
-            "│    x                   Erase       │",
+            "│    d                   Draw pixel  │",
+            "│    D                   Draw mode   │",
+            "│    x                   Erase pixel │",
+            "│    X                   Erase mode  │",
             "│                                    │",
             "│  COLORS                            │",
             "│    1-9                 Pick color  │",
             "│    [ / ]               Cycle color │",
-            "│    P                   Palette     │",
+            "│    i                   Eyedropper  │",
+            "│    p                   Palette     │",
             "│                                    │",
             "│  FILE                              │",
             "│    s                   Save        │",
-            "│    Q                   Quit        │",
+            "│    q                   Quit        │",
             "╰─────────────────────────────────────╯",
         ]
         

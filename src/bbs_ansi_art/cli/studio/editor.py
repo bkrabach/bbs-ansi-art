@@ -132,9 +132,8 @@ class EditorApp:
         """Set up inter-widget communication callbacks."""
         # Sync colors from palette to editor
         def on_palette_color_change(color: tuple[int, int, int]) -> None:
-            # Find closest palette index for the editor
-            idx = self._find_closest_color(color)
-            self.editor.set_fg_color(idx)
+            # Set the RGB color directly on the editor (supports full color range)
+            self.editor.set_fg_color_rgb(color)
             self._needs_redraw = True
         
         self.palette.set_on_color_change(on_palette_color_change)
@@ -757,30 +756,29 @@ class EditorApp:
         
         help_content = [
             "╭───────────────────────────────────────╮",
-            "│         EDITOR HELP  (? to close)    │",
+            "│         EDITOR HELP  (? to close)     │",
             "├───────────────────────────────────────┤",
-            "│  NAVIGATION                          │",
-            "│    Arrow keys / hjkl    Move cursor  │",
-            "│    Shift+Arrow          Move fast    │",
-            "│    Home / End           Line start   │",
-            "│    PgUp / PgDn          Scroll page  │",
-            "│                                      │",
-            "│  DRAWING                             │",
-            "│    Space / Enter        Paint pixel  │",
-            "│    d                    Paint+move   │",
-            "│    x                    Erase        │",
-            "│    D (shift)            Draw mode    │",
-            "│    X (shift)            Erase mode   │",
-            "│    Esc                  Exit mode    │",
-            "│                                      │",
-            "│  COLORS                              │",
-            "│    I                    Pick color   │",
-            "│    [ / ]                Cycle color  │",
-            "│    P                    Palette      │",
-            "│                                      │",
-            "│  FILE                                │",
-            "│    S                    Save         │",
-            "│    Q                    Quit         │",
+            "│  NAVIGATION                           │",
+            "│    Arrow keys / hjkl    Move cursor   │",
+            "│    Shift+Arrow          Move fast     │",
+            "│    Home / End           Line start    │",
+            "│    PgUp / PgDn          Scroll page   │",
+            "│                                       │",
+            "│  DRAWING                              │",
+            "│    d                    Draw pixel    │",
+            "│    D                    Draw mode     │",
+            "│    x                    Erase pixel   │",
+            "│    X                    Erase mode    │",
+            "│    Esc                  Exit mode     │",
+            "│                                       │",
+            "│  COLORS                               │",
+            "│    i                    Pick color    │",
+            "│    [ / ]                Cycle color   │",
+            "│    p                    Palette       │",
+            "│                                       │",
+            "│  FILE                                 │",
+            "│    s                    Save          │",
+            "│    q                    Quit          │",
             "╰───────────────────────────────────────╯",
         ]
         
@@ -797,18 +795,20 @@ class EditorApp:
         while len(result) < height:
             result.append(" " * width)
         
+        # Use same dark gray background for entire line (including padding)
+        # This ensures nothing from underlying content shows through
+        bg_style = "\x1b[48;5;236m"  # Dark gray background
+        
         for i, help_line in enumerate(help_content):
             line_y = start_y + i
             if 0 <= line_y < len(result):
-                existing = result[line_y]
-                
-                # Build new line: before + styled help + reset + after
-                # Use simple replacement - pad before, add help, pad after
-                before = " " * start_x
+                # Build line with consistent background across full width
+                before_pad = " " * start_x
                 after_start = start_x + help_width
                 after_pad = " " * max(0, width - after_start)
                 
-                result[line_y] = f"{before}{style}{help_line}{reset}{after_pad}\x1b[K"
+                # Full line with solid background, erase to end of line to clear any remnants
+                result[line_y] = f"\x1b[0m{bg_style}{dim}{before_pad}{style}{help_line}{bg_style}{dim}{after_pad}\x1b[K{reset}"
         
         return result
 
@@ -825,16 +825,17 @@ class EditorApp:
         else:
             # Normal mode shortcuts
             shortcuts.append(Shortcut("↑↓←→", "Move"))
-            shortcuts.append(Shortcut("Space", "Draw"))
+            shortcuts.append(Shortcut("d", "Draw"))
+            shortcuts.append(Shortcut("x", "Erase"))
             shortcuts.append(Shortcut("[]", "Color"))
-            shortcuts.append(Shortcut("I", "Pick color"))
+            shortcuts.append(Shortcut("i", "Pick color"))
             
             if self._palette_visible:
-                shortcuts.append(Shortcut("P", "Hide palette"))
+                shortcuts.append(Shortcut("p", "Hide palette"))
             else:
-                shortcuts.append(Shortcut("P", "Show palette"))
+                shortcuts.append(Shortcut("p", "Show palette"))
             
-            shortcuts.append(Shortcut("S", "Save"))
+            shortcuts.append(Shortcut("s", "Save"))
             shortcuts.append(Shortcut("?", "Help"))
         
         self.status_bar.set_shortcuts(shortcuts)

@@ -42,6 +42,9 @@ class KeyEvent:
     key: Optional[Key] = None  # Named key if recognized
     char: Optional[str] = None  # Character if printable
     raw: str = ""  # Raw escape sequence
+    shift: bool = False  # Shift modifier
+    ctrl: bool = False  # Ctrl modifier
+    alt: bool = False  # Alt modifier
 
     @property
     def is_char(self) -> bool:
@@ -58,6 +61,7 @@ class InputReader:
     """
 
     # Escape sequence mappings (without the \x1b prefix)
+    # Format: sequence -> (Key, shift, ctrl, alt)
     SEQUENCES: dict[str, Key] = {
         # Arrow keys (CSI)
         '[A': Key.UP,
@@ -86,6 +90,28 @@ class InputReader:
         '[15~': Key.F5,
         '[21~': Key.F10,
         '[24~': Key.F12,
+    }
+    
+    # Shift+Arrow sequences (various terminal formats)
+    SHIFT_SEQUENCES: dict[str, Key] = {
+        # xterm/most terminals: CSI 1;2 A/B/C/D
+        '[1;2A': Key.UP,
+        '[1;2B': Key.DOWN,
+        '[1;2C': Key.RIGHT,
+        '[1;2D': Key.LEFT,
+        # Some terminals use different format
+        '[2A': Key.UP,
+        '[2B': Key.DOWN,
+        '[2C': Key.RIGHT,
+        '[2D': Key.LEFT,
+    }
+    
+    # Ctrl+Arrow sequences
+    CTRL_SEQUENCES: dict[str, Key] = {
+        '[1;5A': Key.UP,
+        '[1;5B': Key.DOWN,
+        '[1;5C': Key.RIGHT,
+        '[1;5D': Key.LEFT,
     }
     
     SIMPLE_KEYS: dict[str, Key] = {
@@ -224,6 +250,20 @@ class InputReader:
             raw = '\x1b' + seq
             self._buffer = self._buffer[1 + end_idx:]
             return KeyEvent(key=key, raw=raw)
+        
+        # Check for Shift+Arrow sequences
+        if seq in self.SHIFT_SEQUENCES:
+            key = self.SHIFT_SEQUENCES[seq]
+            raw = '\x1b' + seq
+            self._buffer = self._buffer[1 + end_idx:]
+            return KeyEvent(key=key, raw=raw, shift=True)
+        
+        # Check for Ctrl+Arrow sequences
+        if seq in self.CTRL_SEQUENCES:
+            key = self.CTRL_SEQUENCES[seq]
+            raw = '\x1b' + seq
+            self._buffer = self._buffer[1 + end_idx:]
+            return KeyEvent(key=key, raw=raw, ctrl=True)
         
         # Unknown sequence
         raw = '\x1b' + seq

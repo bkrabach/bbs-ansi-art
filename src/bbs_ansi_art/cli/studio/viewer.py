@@ -216,6 +216,11 @@ class ViewerApp:
             self._clean_current_file()
             return
         
+        # Edit current file
+        if event.char == 'e':
+            self._edit_current_file()
+            return
+        
         # All other input goes to file browser
         self.file_list.handle_input(event)
 
@@ -243,6 +248,21 @@ class ViewerApp:
             self.art_canvas.clear()
             self._current_file = path  # Keep filename for error display
             self._load_error = str(e) or type(e).__name__
+
+    def _edit_current_file(self) -> None:
+        """Open the current file in the editor."""
+        if not self._current_file:
+            return
+        
+        from bbs_ansi_art.cli.studio.editor import EditorApp
+        
+        # Launch editor (it handles its own terminal mode)
+        editor = EditorApp(self._current_file)
+        editor.run()
+        
+        # After editor exits, reload the file in case it was modified
+        self._load_file(self._current_file)
+        self._needs_redraw = True
 
     def _clean_current_file(self) -> None:
         """Clean the current file and save a cleaned copy."""
@@ -280,6 +300,7 @@ class ViewerApp:
         
         if self._current_file:
             shortcuts.append(Shortcut("c", "Clean"))
+            shortcuts.append(Shortcut("e", "Edit"))
         
         shortcuts.append(Shortcut("q", "Quit"))
         

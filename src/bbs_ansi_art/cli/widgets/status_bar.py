@@ -55,7 +55,7 @@ class StatusBarWidget(BaseWidget):
         shortcuts_visible_len = 0
         
         for sc in reversed(self._shortcuts):
-            part = f"\x1b[7m {sc.key} \x1b[0;36m{sc.label} "
+            part = f"\x1b[7m {sc.key} \x1b[27;100;97m {sc.label} "
             part_len = _visible_len(part)
             
             # Reserve space for left text + some padding
@@ -78,14 +78,18 @@ class StatusBarWidget(BaseWidget):
         if center:
             left_center += f"  {center}"
         
-        # Truncate if needed
-        if len(left_center) > available:
+        # Truncate if needed (use visible length for calculation)
+        visible_len = _visible_len(left_center)
+        if visible_len > available:
             left_center = left_center[:available - 1] + "…"
+            visible_len = available
         
-        # Build final line
-        padding_needed = width - len(left_center) - shortcuts_visible_len
+        # Build final line - FIRST clear line, then draw
+        # This ensures no stray characters from previous content
+        padding_needed = width - visible_len - shortcuts_visible_len
         padding = " " * max(0, padding_needed)
         
+        # Start with clear-to-end-of-line, then draw the full bar
         line = f"\x1b[100m\x1b[97m{left_center}{padding}{shortcuts_str}\x1b[0m"
         
         return [line]

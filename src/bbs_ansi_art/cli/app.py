@@ -122,6 +122,15 @@ def create_app() -> "typer.Typer":
         from bbs_ansi_art.cli.studio.viewer import run_viewer
         run_viewer(path)
     
+    @app.command()
+    def edit(
+        path: Annotated[Path, typer.Argument(help="File to edit")],
+    ):
+        """Edit ANSI art file interactively."""
+        from bbs_ansi_art.cli.studio.editor import EditorApp
+        editor = EditorApp(path)
+        editor.run()
+    
     @app.command("import-image")
     def import_image(
         sources: Annotated[list[str], typer.Argument(help="Source image(s) or glob pattern (e.g., 'logo-*.png')")],
