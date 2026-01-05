@@ -743,6 +743,65 @@ class EditorApp:
         
         return line
     
+    def _ansi_slice(self, s: str, start: int, end: int) -> str:
+        """Slice a string by visual position, preserving ANSI escape codes.
+        
+        Args:
+            s: String potentially containing ANSI escape codes
+            start: Visual start position (inclusive)
+            end: Visual end position (exclusive)
+            
+        Returns:
+            Substring from visual position start to end, with ANSI codes intact
+        """
+        import re
+        # Pattern matches ANSI escape sequences
+        ansi_pattern = re.compile(r'\x1b\[[0-9;]*m')
+        
+        result = []
+        visual_pos = 0
+        i = 0
+        active_codes = []  # Track active ANSI codes to reapply
+        
+        while i < len(s):
+            # Check for ANSI escape sequence
+            match = ansi_pattern.match(s, i)
+            if match:
+                code = match.group()
+                # Track the code (reset clears all)
+                if code == '\x1b[0m':
+                    active_codes = []
+                else:
+                    active_codes.append(code)
+                # Include codes that appear before or within our slice
+                if visual_pos <= end:
+                    if visual_pos >= start or (result and visual_pos < start):
+                        pass  # Will be handled below
+                    if visual_pos < start:
+                        pass  # Keep tracking but don't add yet
+                    else:
+                        result.append(code)
+                i = match.end()
+            else:
+                # Regular character
+                if start <= visual_pos < end:
+                    # First char? Prepend active codes
+                    if not result and active_codes:
+                        result.extend(active_codes)
+                    result.append(s[i])
+                visual_pos += 1
+                i += 1
+                
+                if visual_pos >= end:
+                    break
+        
+        return ''.join(result)
+
+    def _ansi_visual_len(self, s: str) -> int:
+        """Get visual length of string (excluding ANSI codes)."""
+        import re
+        return len(re.sub(r'\x1b\[[0-9;]*m', '', s))
+
     def _overlay_help_fullscreen(self, lines: list[str], width: int, height: int) -> list[str]:
         """Overlay help modal centered on full screen.
         
@@ -751,7 +810,6 @@ class EditorApp:
         """
         # Style: bold white on dark gray background
         style = "\x1b[1;97;48;5;236m"
-        dim = "\x1b[2;37;48;5;236m"
         reset = "\x1b[0m"
         
         help_content = [
@@ -795,20 +853,23 @@ class EditorApp:
         while len(result) < height:
             result.append(" " * width)
         
-        # Use same dark gray background for entire line (including padding)
-        # This ensures nothing from underlying content shows through
-        bg_style = "\x1b[48;5;236m"  # Dark gray background
-        
         for i, help_line in enumerate(help_content):
             line_y = start_y + i
             if 0 <= line_y < len(result):
-                # Build line with consistent background across full width
-                before_pad = " " * start_x
-                after_start = start_x + help_width
-                after_pad = " " * max(0, width - after_start)
+                existing = result[line_y]
                 
-                # Full line with solid background, erase to end of line to clear any remnants
-                result[line_y] = f"\x1b[0m{bg_style}{dim}{before_pad}{style}{help_line}{bg_style}{dim}{after_pad}\x1b[K{reset}"
+                # Get content before and after the modal using ANSI-aware slicing
+                before = self._ansi_slice(existing, 0, start_x)
+                after_start = start_x + help_width
+                after = self._ansi_slice(existing, after_start, width)
+                
+                # Pad 'before' if it's visually shorter than start_x
+                before_visual_len = self._ansi_visual_len(before)
+                if before_visual_len < start_x:
+                    before = before + " " * (start_x - before_visual_len)
+                
+                # Compose: before + styled help + reset + after
+                result[line_y] = f"{before}{style}{help_line}{reset}{after}"
         
         return result
 
